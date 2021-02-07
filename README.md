@@ -1,32 +1,40 @@
 # JWT Go example
+Code based on [here](https://github.com/sohamkamani/jwt-go-example).
 
-Example application that implements JWT based authentication. Read the blog post [here](https://sohamkamani.com/blog/golang/2019-01-01-jwt-authentication/)
-
-To run this application, build and run the Go binary:
+Adding some changes:
+- Using Bearer token header instead of cookies
+- User management signup with persistence on disk (simple file)
+- User log out feature using jwtToken white listing.
+- Hash the passwords stored locally
 
 ```sh
 go build
-./jwt-go-example
+./jwt-go-mabate
 ```
 
-Now, using any HTTP client with support for cookies (like [Postman](https://www.getpostman.com/apps), or your web browser) make a sign-in request with the appropriate credentials:
+Sign up a new user:
+```
+curl -X POST -i -H "Accept: application/json" -H "Content-Type: application/json" --data '{"username":"newuser","password":"newpass"}' http://localhost:8000/signup
 
 ```
-POST http://localhost:8000/signin
 
-{"username":"user1","password":"password1"}
+Sign in with the new user:
+```
+curl -X POST -i -H "Accept: application/json" -H "Content-Type: application/json" --data '{"username":"newuser","password":"newpass"}' http://localhost:8000/signin
+
 ```
 
-You can now try hitting the welcome route from the same client to get the welcome message:
-
+Try some endpoint that enforces authentication (need to send jwt token)
 ```
-GET http://localhost:8000/welcome
-```
-
-Hit the refresh route, and then inspect the clients cookies to see the new value of the `token` cookie:
-
-```
-POST http://localhost:8000/refresh
+curl -X GET -i -H "Authorization: Bearer <your-jwt-token>" http://localhost:8000/welcome
 ```
 
-You can find the working source code for this example [here](https://github.com/sohamkamani/jwt-go-example).
+Try refresh endpoint to get a new token (need to send jwt token)
+```
+curl -X GET -i -H "Authorization: Bearer <your-jwt-token>" http://localhost:8000/refresh
+```
+Logout (need to send jwt token). It takes the passed token out of the whitelist, it cannot be used again (so it works as a logout)
+```
+curl -X GET -i -H "Authorization: Bearer <your-jwt-token>" http://localhost:8000/logout
+```
+
