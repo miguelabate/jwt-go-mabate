@@ -11,11 +11,13 @@ import (
 var mutexForUsersFile sync.Mutex
 
 var Users = map[string]string{
-	"user1": "$2a$04$RPZE/QIYIPPMs5LdQLnvEusceMYVPdi8jLwT3xQjE1W/5bkHQRYYa",//password1
-	"user2": "$2a$04$F.NebGTA/K3EnHBejFSFoe8QfCt.h8zFQamp560qbbjRNaLo.NwSO",//password2
+	"user1": "$2a$04$RPZE/QIYIPPMs5LdQLnvEusceMYVPdi8jLwT3xQjE1W/5bkHQRYYa", //password1
+	"user2": "$2a$04$F.NebGTA/K3EnHBejFSFoe8QfCt.h8zFQamp560qbbjRNaLo.NwSO", //password2
 }
 
-func SaveUser(username string, hashedPassword string) {
+var UserRoles = map[string][]string{}
+
+func SaveUser(username string, hashedPassword string, roles []string) {
 	mutexForUsersFile.Lock()
 	defer mutexForUsersFile.Unlock()
 
@@ -25,15 +27,15 @@ func SaveUser(username string, hashedPassword string) {
 		log.Println("Failed to open users file")
 		return
 	}
-	_, err = file.WriteString(username+":"+hashedPassword+"\n")
-	if  err != nil {
+	_, err = file.WriteString(username + ":" + strings.Join(roles, ",") + ":" + hashedPassword + "\n")
+	if err != nil {
 		log.Println("Failed to write users file")
 		return
 	}
 
 	// Save file changes.
 	err = file.Sync()
-	if  err != nil {
+	if err != nil {
 		log.Println("Failed to close users file")
 		return
 	}
@@ -43,7 +45,7 @@ func SaveUser(username string, hashedPassword string) {
 
 func LoadUsersFromDB() {
 	// Open file for reading.
-	var file, err = os.OpenFile("./usersDB", os.O_RDWR, 0644)
+	var file, err = os.OpenFile("./usersDB", os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
 		log.Println("Failed to open users file")
 		return
@@ -52,9 +54,10 @@ func LoadUsersFromDB() {
 
 	// Read file, line by line
 	scanner := bufio.NewScanner(file)
-	var userPass []string
+	var userRolesPass []string
 	for scanner.Scan() {
-		userPass =strings.Split(scanner.Text(),":")
-		Users[userPass[0]] = userPass[1]
+		userRolesPass = strings.Split(scanner.Text(), ":")
+		Users[userRolesPass[0]] = userRolesPass[2]
+		UserRoles[userRolesPass[0]] = strings.Split(userRolesPass[1], ",")
 	}
 }

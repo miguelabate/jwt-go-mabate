@@ -1,4 +1,4 @@
-package jwt
+package jwthandler
 
 import (
 	"encoding/json"
@@ -23,8 +23,8 @@ type Credentials struct {
 
 //
 type Claims struct {
-	Username string `json:"username"`
-	Role string `json:"role"`
+	Username string   `json:"username"`
+	Roles    []string `json:"roles"`
 	jwt.StandardClaims
 }
 
@@ -40,7 +40,7 @@ func Signup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// check if the user already exists
-	if _, ok := users.Users[creds.Username] ; ok {
+	if _, ok := users.Users[creds.Username]; ok {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(fmt.Sprintf("Error: User %s already exists", creds.Username)))
 		return
@@ -48,9 +48,10 @@ func Signup(w http.ResponseWriter, r *http.Request) {
 
 	//all good. create the user
 	users.Users[creds.Username] = hashAndSalt([]byte(creds.Password))
+	users.UserRoles[creds.Username] = []string{"CLIENT"} //create default role as CLIENT
 
 	//write to persistence
-	users.SaveUser(creds.Username, users.Users[creds.Username])
+	users.SaveUser(creds.Username, users.Users[creds.Username], users.UserRoles[creds.Username])
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(fmt.Sprintf("User %s created", creds.Username)))
@@ -73,7 +74,7 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 	// If a password exists for the given user
 	// AND, if it is the same as the password we received, the we can move ahead
 	// if NOT, then we return an "Unauthorized" status
-	if !ok || !comparePasswords(expectedPassword,[]byte(creds.Password)) {
+	if !ok || !comparePasswords(expectedPassword, []byte(creds.Password)) {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
@@ -84,6 +85,7 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 	// Create the JWT claims, which includes the username and expiry time
 	claims := &Claims{
 		Username: creds.Username,
+		Roles:    users.UserRoles[creds.Username],
 		StandardClaims: jwt.StandardClaims{
 			// In JWT, the expiry time is expressed as unix milliseconds
 			ExpiresAt: expirationTime.Unix(),
@@ -100,25 +102,46 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-
 	whiteListTokens = append(whiteListTokens, tokenString)
 
 	w.Write([]byte(fmt.Sprintf("JWT token: %s", tokenString)))
 }
 
-func Welcome(w http.ResponseWriter, r *http.Request) {
-	_, claims, failedAuth := checkJwtAuth(w, r)
-	if failedAuth {
-		return
-	}
+func WithJwtCheck(handler func(w http.ResponseWriter, r *http.Request, jwtToken *jwt.Token, claims *Claims), neededRoles []string) func(http.ResponseWriter, *http.Request) {
 
-	// Finally, return the welcome message to the user, along with their
-	// username given in the token
-	w.Write([]byte(fmt.Sprintf("Welcome %s!", claims.Username)))
+	//decorate the call with the jwt token check and pass the result to the handler function so it can access the token and claims if needed
+	return func(w http.ResponseWriter, r *http.Request) {
+		tkn, claims, failedAuth := CheckJwtAuth(w, r)
+		if failedAuth {
+			w.Write([]byte(fmt.Sprintf("Permission error.")))
+			log.Println("Permission error.")
+			return
+		}
+
+		if !contains(claims.Roles, neededRoles) {
+			w.Write([]byte(fmt.Sprintf("Permission error. User does not have necessary role.")))
+			log.Println("Permission error. User does not have necessary role.")
+			return
+		}
+
+		handler(w, r, tkn, claims)
+	}
+}
+
+// true if any of elements is present in s
+func contains(s []string, e []string) bool {
+	for _, a := range s {
+		for _, b := range e {
+			if a == b {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func Refresh(w http.ResponseWriter, r *http.Request) {
-	tkn, claims, failedAuth := checkJwtAuth(w, r)
+	tkn, claims, failedAuth := CheckJwtAuth(w, r)
 	if failedAuth {
 		return
 	}
@@ -143,7 +166,7 @@ func Refresh(w http.ResponseWriter, r *http.Request) {
 }
 
 func Logout(w http.ResponseWriter, r *http.Request) {
-	tkn, _, failedAuth := checkJwtAuth(w, r)
+	tkn, _, failedAuth := CheckJwtAuth(w, r)
 	if failedAuth {
 		return
 	}
@@ -154,7 +177,7 @@ func Logout(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(fmt.Sprintf("LoggedOut")))
 }
 
-func checkJwtAuth(w http.ResponseWriter, r *http.Request) (*jwt.Token, *Claims, bool) {
+func CheckJwtAuth(w http.ResponseWriter, r *http.Request) (*jwt.Token, *Claims, bool) {
 	// (BEGIN) The code uptil this point is the same as the first part of the `Welcome` route
 	// We can obtain the session token from the requests cookies, which come with every request
 	bearerToken := r.Header.Get("Authorization")
@@ -237,5 +260,3 @@ func comparePasswords(hashedPwd string, plainPwd []byte) bool { //true: equals
 
 	return true
 }
-
-

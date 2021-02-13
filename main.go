@@ -1,19 +1,23 @@
 package main
 
 import (
-	"github.com/miguelabate/jwt-go-mabate/jwt"
+	"fmt"
+	"github.com/dgrijalva/jwt-go"
+	"github.com/miguelabate/jwt-go-mabate/jwthandler"
 	"github.com/miguelabate/jwt-go-mabate/users"
 	"log"
 	"net/http"
 )
 
 func main() {
-	// "Signin" and "Welcome" are the handlers that we will implement
-	http.HandleFunc("/signin", jwt.Signin)
-	http.HandleFunc("/signup", jwt.Signup)
-	http.HandleFunc("/welcome", jwt.Welcome)
-	http.HandleFunc("/refresh",jwt. Refresh)
-	http.HandleFunc("/logout", jwt.Logout)
+	// provided
+	http.HandleFunc("/signin", jwthandler.Signin)
+	http.HandleFunc("/signup", jwthandler.Signup)
+	http.HandleFunc("/refresh", jwthandler.Refresh)
+	http.HandleFunc("/logout", jwthandler.Logout)
+
+	// custom
+	http.HandleFunc("/welcome", jwthandler.WithJwtCheck(Welcome, []string{"CLIENT", "ADMIN"}))
 
 	users.LoadUsersFromDB()
 
@@ -21,4 +25,9 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8000", nil))
 
 	//fmt.Println(hashAndSalt([]byte("password2")))
+}
+
+func Welcome(w http.ResponseWriter, r *http.Request, jwtToken *jwt.Token, claims *jwthandler.Claims) {
+	// username given in the token
+	w.Write([]byte(fmt.Sprintf("Welcome %s!", claims.Username)))
 }

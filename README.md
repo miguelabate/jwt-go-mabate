@@ -1,4 +1,4 @@
-# JWT Go example
+# JWT Go
 Code based on [here](https://github.com/sohamkamani/jwt-go-example).
 
 Adding some changes:
