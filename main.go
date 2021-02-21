@@ -17,7 +17,7 @@ func main() {
 	http.HandleFunc("/logout", jwthandler.Logout)
 
 	// custom
-	http.HandleFunc("/welcome", jwthandler.WithJwtCheck(Welcome, []string{"CLIENT", "ADMIN"}))
+	http.HandleFunc("/welcome", jwthandler.WithJwtCheck(Welcome, []string{"CLIENT", "ADMIN"}, true))
 
 	users.LoadUsersFromDB()
 
@@ -29,5 +29,5 @@ func main() {
 
 func Welcome(w http.ResponseWriter, r *http.Request, jwtToken *jwt.Token, claims *jwthandler.Claims) {
 	// username given in the token
-	w.Write([]byte(fmt.Sprintf("Welcome %s!", claims.Username)))
+	w.Write([]byte(fmt.Sprintf("Welcome %s!\n Your roles are: %s", claims.Username, claims.Roles)))
 }

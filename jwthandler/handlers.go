@@ -11,17 +11,22 @@ import (
 	"time"
 )
 
-var jwtKey = []byte("my_secret_key1")
+var JwtTokenLifeInMinutes = 5
+var JwtTokenRefreshPeriodInSeconds = 30
 
+// key to sign the jwt tokens
+var jwtKey = []byte("change_this_key")
+
+// keep a whitelist of jwt tokens that are active. this is lost every time the server restarts
 var whiteListTokens = make([]string, 5, 5)
 
-// Create a struct that models the structure of a user, both in the request body, and in the DB
+// Create a struct to model credentials (used as request body when creating and login in users)
 type Credentials struct {
 	Password string `json:"password"`
 	Username string `json:"username"`
 }
 
-//
+// standard jwt claims plus custom data (e.g.: Roles)
 type Claims struct {
 	Username string   `json:"username"`
 	Roles    []string `json:"roles"`
@@ -81,7 +86,7 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 
 	// Declare the expiration time of the token
 	// here, we have kept it as 5 minutes
-	expirationTime := time.Now().Add(5 * time.Minute)
+	expirationTime := time.Now().Add(time.Duration(JwtTokenLifeInMinutes) * time.Minute)
 	// Create the JWT claims, which includes the username and expiry time
 	claims := &Claims{
 		Username: creds.Username,
@@ -104,13 +109,24 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 
 	whiteListTokens = append(whiteListTokens, tokenString)
 
-	w.Write([]byte(fmt.Sprintf("JWT token: %s", tokenString)))
+	w.Write([]byte(fmt.Sprintf("%s", tokenString)))
 }
 
-func WithJwtCheck(handler func(w http.ResponseWriter, r *http.Request, jwtToken *jwt.Token, claims *Claims), neededRoles []string) func(http.ResponseWriter, *http.Request) {
+// wrapper to use for custom endpoints of the actual service that need authentication
+// handler: is the actual service function that will handle the request after the authentication/authorization
+// neededRoles: list of needed roles by the calling user to get access to the service call
+// corsEnabled: mostly for debug. If true will enable cors headers
+func WithJwtCheck(handler func(w http.ResponseWriter, r *http.Request, jwtToken *jwt.Token, claims *Claims), neededRoles []string, corsEnabled bool) func(http.ResponseWriter, *http.Request) {
 
 	//decorate the call with the jwt token check and pass the result to the handler function so it can access the token and claims if needed
 	return func(w http.ResponseWriter, r *http.Request) {
+		if corsEnabled {
+			enableCors(&w)
+		}
+		if r.Method == http.MethodOptions { // so CORS doesnt fail when probing options
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		tkn, claims, failedAuth := CheckJwtAuth(w, r)
 		if failedAuth {
 			w.Write([]byte(fmt.Sprintf("Permission error.")))
@@ -128,21 +144,19 @@ func WithJwtCheck(handler func(w http.ResponseWriter, r *http.Request, jwtToken 
 	}
 }
 
-// true if any of elements is present in s
-func contains(s []string, e []string) bool {
-	for _, a := range s {
-		for _, b := range e {
-			if a == b {
-				return true
-			}
-		}
-	}
-	return false
-}
-
+// returns a new token if the current is valid and within JwtTokenRefreshPeriodInSeconds seconds of expiration time
 func Refresh(w http.ResponseWriter, r *http.Request) {
 	tkn, claims, failedAuth := CheckJwtAuth(w, r)
 	if failedAuth {
+		return
+	}
+
+	// New token is issued only 30 seconds before the old one expires. If a request is made before that time.
+	// it will return Ok and the same token.
+	if time.Unix(claims.ExpiresAt, 0).Sub(time.Now()) > time.Duration(JwtTokenRefreshPeriodInSeconds)*time.Second {
+		fmt.Println("not yet", time.Unix(claims.ExpiresAt, 0).Sub(time.Now()))
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(fmt.Sprintf("%s", tkn.Raw))) //just return the old one, still valid
 		return
 	}
 
@@ -150,7 +164,7 @@ func Refresh(w http.ResponseWriter, r *http.Request) {
 	whiteListTokens = remove(whiteListTokens, tkn.Raw)
 
 	// Now, create a new token for the current use, with a renewed expiration time
-	expirationTime := time.Now().Add(5 * time.Minute)
+	expirationTime := time.Now().Add(time.Duration(JwtTokenLifeInMinutes) * time.Minute)
 	claims.ExpiresAt = expirationTime.Unix()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, err := token.SignedString(jwtKey)
@@ -162,9 +176,10 @@ func Refresh(w http.ResponseWriter, r *http.Request) {
 	//add new token to the whitelist
 	whiteListTokens = append(whiteListTokens, tokenString)
 
-	w.Write([]byte(fmt.Sprintf("JWT token: %s", tokenString)))
+	w.Write([]byte(fmt.Sprintf("%s", tokenString)))
 }
 
+// deletes the jwt token from the current whitelist. Effectively preventing further calls and forcing a signin.
 func Logout(w http.ResponseWriter, r *http.Request) {
 	tkn, _, failedAuth := CheckJwtAuth(w, r)
 	if failedAuth {
@@ -177,17 +192,18 @@ func Logout(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(fmt.Sprintf("LoggedOut")))
 }
 
+// checks the token validation from a requests (it takes it from the Authorization header)
+// returns the token, the claims and a boolean representing if there was an error (true) or nor (false)
 func CheckJwtAuth(w http.ResponseWriter, r *http.Request) (*jwt.Token, *Claims, bool) {
-	// (BEGIN) The code uptil this point is the same as the first part of the `Welcome` route
-	// We can obtain the session token from the requests cookies, which come with every request
+	// We can obtain the session token from the requests Authorization header, which come with every request
 	bearerToken := r.Header.Get("Authorization")
 	if bearerToken == "" {
-		// If the cookie is not set, return an unauthorized status
+		// If the Authorization header is not set, return an unauthorized status
 		w.WriteHeader(http.StatusUnauthorized)
 		return &jwt.Token{}, &Claims{}, true
 	}
 
-	// Get the JWT string from the cookie
+	// Get the JWT string from the Authorization header
 	tknStr := bearerToken[7:]
 
 	// Initialize a new instance of `Claims`
@@ -213,13 +229,31 @@ func CheckJwtAuth(w http.ResponseWriter, r *http.Request) (*jwt.Token, *Claims, 
 		return tkn, claims, true
 	}
 
-	//also the token needs to be whiteliste
+	//also the token needs to be whitelisted
 	if !exists(whiteListTokens, tknStr) {
 		w.WriteHeader(http.StatusUnauthorized)
 		return tkn, claims, true
 	}
-	// (END) The code uptil this point is the same as the first part of the `Welcome` route
+
 	return tkn, claims, false
+}
+
+// true if any of elements is present in s
+func contains(s []string, e []string) bool {
+	for _, a := range s {
+		for _, b := range e {
+			if a == b {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func enableCors(w *http.ResponseWriter) {
+	(*w).Header().Set("Access-Control-Allow-Origin", "*")
+	(*w).Header().Add("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
+	(*w).Header().Add("Access-Control-Allow-Headers", "*")
 }
 
 func exists(s []string, r string) bool {
