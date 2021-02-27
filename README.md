@@ -7,6 +7,8 @@ Adding some changes:
 - User log out feature using jwtToken white listing.
 - Hash the passwords stored locally
 
+This code is also showcased in [this article](https://miguelabate.com/jwt-token-auth-in-golang/) 
+
 ```sh
 go build -o jwt-go-server
 ./jwt-go-server
