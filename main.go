@@ -10,6 +10,7 @@ import (
 )
 
 func main() {
+	fmt.Println("Starting JWT Go server ...")
 	// provided
 	http.HandleFunc("/signin", jwthandler.Signin)
 	http.HandleFunc("/signup", jwthandler.Signup)
@@ -19,12 +20,16 @@ func main() {
 	// custom
 	http.HandleFunc("/welcome", jwthandler.WithJwtCheck(Welcome, []string{"CLIENT", "ADMIN"}, true))
 
+	// can override some config values
+	//users.UsersFileLocation = "altUserDB"
+	//jwthandler.JwtTokenLifeInMinutes = 10
+	//jwthandler.JwtTokenRefreshPeriodInSeconds = 60
+
 	users.LoadUsersFromDB()
 
 	//// start the server on port 8000
 	log.Fatal(http.ListenAndServe(":8000", nil))
 
-	//fmt.Println(hashAndSalt([]byte("password2")))
 }
 
 func Welcome(w http.ResponseWriter, r *http.Request, jwtToken *jwt.Token, claims *jwthandler.Claims) {

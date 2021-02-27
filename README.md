@@ -8,8 +8,8 @@ Adding some changes:
 - Hash the passwords stored locally
 
 ```sh
-go build
-./jwt-go-mabate
+go build -o jwt-go-server
+./jwt-go-server
 ```
 
 Sign up a new user:
