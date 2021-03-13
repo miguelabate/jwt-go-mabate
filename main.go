@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/dgrijalva/jwt-go"
 	"github.com/miguelabate/jwt-go-mabate/jwthandler"
 	"github.com/miguelabate/jwt-go-mabate/users"
 	"log"
@@ -32,7 +31,7 @@ func main() {
 
 }
 
-func Welcome(w http.ResponseWriter, r *http.Request, jwtToken *jwt.Token, claims *jwthandler.Claims) {
+func Welcome(w http.ResponseWriter, r *http.Request, jwtToken *jwthandler.MaJwt) {
 	// username given in the token
-	w.Write([]byte(fmt.Sprintf("Welcome %s!\n Your roles are: %s", claims.Username, claims.Roles)))
+	w.Write([]byte(fmt.Sprintf("Welcome %s!\n Your roles are: %s", jwtToken.Claims.Username, jwtToken.Claims.Roles)))
 }

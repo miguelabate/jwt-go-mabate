@@ -64,3 +64,9 @@ func LoadUsersFromDB() {
 		UserRoles[userRolesPass[0]] = strings.Split(userRolesPass[1], ",")
 	}
 }
+
+// used for testing, just adds a user and roles directly
+func AddUser(userName string, userPass string, roles []string) {
+	Users[userName] = userPass
+	UserRoles[userName] = roles
+}

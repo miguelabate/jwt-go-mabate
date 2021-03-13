@@ -3,7 +3,8 @@ package jwthandler
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/dgrijalva/jwt-go"
+	"github.com/lestrrat-go/jwx/jwa"
+	lestjwt "github.com/lestrrat-go/jwx/jwt"
 	"github.com/miguelabate/jwt-go-mabate/users"
 	"golang.org/x/crypto/bcrypt"
 	"log"
@@ -26,11 +27,22 @@ type Credentials struct {
 	Username string `json:"username"`
 }
 
-// standard jwt claims plus custom data (e.g.: Roles)
-type Claims struct {
-	Username string   `json:"username"`
-	Roles    []string `json:"roles"`
-	jwt.StandardClaims
+type MaJwt struct {
+	Raw    string
+	Claims MaClaims
+	valid  bool
+}
+
+type MaClaims struct {
+	Username  string   `json:"username"`
+	Roles     []string `json:"roles"`
+	Audience  string   `json:"aud,omitempty"`
+	ExpiresAt int64    `json:"exp,omitempty"`
+	Id        string   `json:"jti,omitempty"`
+	IssuedAt  int64    `json:"iat,omitempty"`
+	Issuer    string   `json:"iss,omitempty"`
+	NotBefore int64    `json:"nbf,omitempty"`
+	Subject   string   `json:"sub,omitempty"`
 }
 
 //not secured: to sign up. Creates a user/pass in the db
@@ -87,36 +99,58 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 	// Declare the expiration time of the token
 	// here, we have kept it as 5 minutes
 	expirationTime := time.Now().Add(time.Duration(JwtTokenLifeInMinutes) * time.Minute)
-	// Create the JWT claims, which includes the username and expiry time
-	claims := &Claims{
-		Username: creds.Username,
-		Roles:    users.UserRoles[creds.Username],
-		StandardClaims: jwt.StandardClaims{
-			// In JWT, the expiry time is expressed as unix milliseconds
-			ExpiresAt: expirationTime.Unix(),
-		},
+
+	// Create the JWT token and claims, which includes the username and expiry time
+	token := lestjwt.New()
+	claims := MaClaims{
+		Username:  creds.Username,
+		Roles:     users.UserRoles[creds.Username],
+		ExpiresAt: expirationTime.Unix(),
 	}
 
-	// Declare the token with the algorithm used for signing, and the claims
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	// Create the JWT string
-	tokenString, err := token.SignedString(jwtKey)
+	// set the claims into the token
+	addClaims(&token, &claims)
+
+	// Sign the token and generate a payload
+	signed, err := lestjwt.Sign(token, jwa.HS256, jwtKey)
 	if err != nil {
-		// If there is an error in creating the JWT return an internal server error
-		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Printf("failed to generate signed payload: %s\n", err)
 		return
 	}
 
-	whiteListTokens = append(whiteListTokens, tokenString)
+	whiteListTokens = append(whiteListTokens, string(signed))
 
-	w.Write([]byte(fmt.Sprintf("%s", tokenString)))
+	// This is what you typically get as a signed JWT from a server
+	w.Write([]byte(fmt.Sprintf("%s", string(signed))))
+}
+
+func addClaims(token *lestjwt.Token, claims *MaClaims) {
+	(*token).Set(`username`, claims.Username)
+	(*token).Set(`roles`, claims.Roles)
+	(*token).Set(lestjwt.ExpirationKey, claims.ExpiresAt)
+}
+
+// function that extract some claims of interest from the token and put them in claims
+func getClaims(token *lestjwt.Token, claims *MaClaims) {
+	if v, ok := (*token).Get(`username`); ok {
+		claims.Username = v.(string)
+	}
+	if v, ok := (*token).Get(`roles`); ok {
+		claims.Roles = make([]string, 0)
+		for _, message := range v.([]interface{}) {
+			claims.Roles = append(claims.Roles, message.(string))
+		}
+	}
+	if v, ok := (*token).Get(lestjwt.ExpirationKey); ok {
+		claims.ExpiresAt = v.(time.Time).Unix()
+	}
 }
 
 // wrapper to use for custom endpoints of the actual service that need authentication
 // handler: is the actual service function that will handle the request after the authentication/authorization
 // neededRoles: list of needed roles by the calling user to get access to the service call
 // corsEnabled: mostly for debug. If true will enable cors headers
-func WithJwtCheck(handler func(w http.ResponseWriter, r *http.Request, jwtToken *jwt.Token, claims *Claims), neededRoles []string, corsEnabled bool) func(http.ResponseWriter, *http.Request) {
+func WithJwtCheck(handler func(w http.ResponseWriter, r *http.Request, jwtToken *MaJwt), neededRoles []string, corsEnabled bool) func(http.ResponseWriter, *http.Request) {
 
 	//decorate the call with the jwt token check and pass the result to the handler function so it can access the token and claims if needed
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -127,34 +161,36 @@ func WithJwtCheck(handler func(w http.ResponseWriter, r *http.Request, jwtToken 
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		tkn, claims, failedAuth := CheckJwtAuth(w, r)
+		tkn, failedAuth := CheckJwtAuth(w, r)
 		if failedAuth {
+			w.WriteHeader(http.StatusUnauthorized)
 			w.Write([]byte(fmt.Sprintf("Permission error.")))
 			log.Println("Permission error.")
 			return
 		}
 
-		if !contains(claims.Roles, neededRoles) {
+		if !contains(tkn.Claims.Roles, neededRoles) {
+			w.WriteHeader(http.StatusUnauthorized)
 			w.Write([]byte(fmt.Sprintf("Permission error. User does not have necessary role.")))
 			log.Println("Permission error. User does not have necessary role.")
 			return
 		}
 
-		handler(w, r, tkn, claims)
+		handler(w, r, tkn)
 	}
 }
 
 // returns a new token if the current is valid and within JwtTokenRefreshPeriodInSeconds seconds of expiration time
 func Refresh(w http.ResponseWriter, r *http.Request) {
-	tkn, claims, failedAuth := CheckJwtAuth(w, r)
+	tkn, failedAuth := CheckJwtAuth(w, r)
 	if failedAuth {
 		return
 	}
 
 	// New token is issued only 30 seconds before the old one expires. If a request is made before that time.
 	// it will return Ok and the same token.
-	if time.Unix(claims.ExpiresAt, 0).Sub(time.Now()) > time.Duration(JwtTokenRefreshPeriodInSeconds)*time.Second {
-		fmt.Println("not yet", time.Unix(claims.ExpiresAt, 0).Sub(time.Now()))
+	if time.Unix(tkn.Claims.ExpiresAt, 0).Sub(time.Now()) > time.Duration(JwtTokenRefreshPeriodInSeconds)*time.Second {
+		fmt.Println("not yet", time.Unix(tkn.Claims.ExpiresAt, 0).Sub(time.Now()))
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(fmt.Sprintf("%s", tkn.Raw))) //just return the old one, still valid
 		return
@@ -165,23 +201,26 @@ func Refresh(w http.ResponseWriter, r *http.Request) {
 
 	// Now, create a new token for the current use, with a renewed expiration time
 	expirationTime := time.Now().Add(time.Duration(JwtTokenLifeInMinutes) * time.Minute)
-	claims.ExpiresAt = expirationTime.Unix()
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString(jwtKey)
+	tkn.Claims.ExpiresAt = expirationTime.Unix()
+
+	// Sign the token and generate a payload
+	token := lestjwt.New()
+	addClaims(&token, &tkn.Claims)
+	signed, err := lestjwt.Sign(token, jwa.HS256, jwtKey)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Printf("failed to generate signed payload: %s\n", err)
 		return
 	}
 
 	//add new token to the whitelist
-	whiteListTokens = append(whiteListTokens, tokenString)
+	whiteListTokens = append(whiteListTokens, string(signed))
 
-	w.Write([]byte(fmt.Sprintf("%s", tokenString)))
+	w.Write([]byte(fmt.Sprintf("%s", string(signed))))
 }
 
 // deletes the jwt token from the current whitelist. Effectively preventing further calls and forcing a signin.
 func Logout(w http.ResponseWriter, r *http.Request) {
-	tkn, _, failedAuth := CheckJwtAuth(w, r)
+	tkn, failedAuth := CheckJwtAuth(w, r)
 	if failedAuth {
 		return
 	}
@@ -194,48 +233,38 @@ func Logout(w http.ResponseWriter, r *http.Request) {
 
 // checks the token validation from a requests (it takes it from the Authorization header)
 // returns the token, the claims and a boolean representing if there was an error (true) or nor (false)
-func CheckJwtAuth(w http.ResponseWriter, r *http.Request) (*jwt.Token, *Claims, bool) {
+func CheckJwtAuth(w http.ResponseWriter, r *http.Request) (*MaJwt, bool) {
 	// We can obtain the session token from the requests Authorization header, which come with every request
 	bearerToken := r.Header.Get("Authorization")
 	if bearerToken == "" {
 		// If the Authorization header is not set, return an unauthorized status
 		w.WriteHeader(http.StatusUnauthorized)
-		return &jwt.Token{}, &Claims{}, true
+		return &MaJwt{}, true
 	}
 
 	// Get the JWT string from the Authorization header
 	tknStr := bearerToken[7:]
 
 	// Initialize a new instance of `Claims`
-	claims := &Claims{}
+	claims := MaClaims{}
 
-	// Parse the JWT string and store the result in `claims`.
-	// Note that we are passing the key in this method as well. This method will return an error
-	// if the token is invalid (if it has expired according to the expiry time we set on sign in),
-	// or if the signature does not match
-	tkn, err := jwt.ParseWithClaims(tknStr, claims, func(token *jwt.Token) (interface{}, error) {
-		return jwtKey, nil
-	})
+	token, err := lestjwt.Parse([]byte(tknStr), lestjwt.WithVerify(`HS256`, jwtKey))
 	if err != nil {
-		if err == jwt.ErrSignatureInvalid {
-			w.WriteHeader(http.StatusUnauthorized)
-			return tkn, claims, true
-		}
-		w.WriteHeader(http.StatusBadRequest)
-		return tkn, claims, true
-	}
-	if !tkn.Valid {
+		fmt.Printf("failed to parse payload: %s\n", err)
 		w.WriteHeader(http.StatusUnauthorized)
-		return tkn, claims, true
+		return &MaJwt{}, true
 	}
+
+	//get the claims from the token and fill the custom struct
+	getClaims(&token, &claims)
 
 	//also the token needs to be whitelisted
 	if !exists(whiteListTokens, tknStr) {
 		w.WriteHeader(http.StatusUnauthorized)
-		return tkn, claims, true
+		return &MaJwt{Raw: tknStr, Claims: claims, valid: false}, true
 	}
 
-	return tkn, claims, false
+	return &MaJwt{Raw: tknStr, Claims: claims, valid: true}, false
 }
 
 // true if any of elements is present in s
