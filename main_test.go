@@ -19,7 +19,7 @@ func TestLogin(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/signin", strings.NewReader(string(jsonBytes)))
 	responseRecorder := httptest.NewRecorder()
 
-	jwthandler.Signin(responseRecorder, request)
+	jwthandler.SignIn(responseRecorder, request)
 	jwtResponseBody := responseRecorder.Body.String()
 
 	if jwtResponseBody == "" {

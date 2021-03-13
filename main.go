@@ -11,8 +11,8 @@ import (
 func main() {
 	fmt.Println("Starting JWT Go server ...")
 	// provided
-	http.HandleFunc("/signin", jwthandler.Signin)
-	http.HandleFunc("/signup", jwthandler.Signup)
+	http.HandleFunc("/signin", jwthandler.SignIn)
+	http.HandleFunc("/signup", jwthandler.SignUp)
 	http.HandleFunc("/refresh", jwthandler.Refresh)
 	http.HandleFunc("/logout", jwthandler.Logout)
 
@@ -20,7 +20,7 @@ func main() {
 	http.HandleFunc("/welcome", jwthandler.WithJwtCheck(Welcome, []string{"CLIENT", "ADMIN"}, true))
 
 	// can override some config values
-	//users.UsersFileLocation = "altUserDB"
+	//users.PersistenceUsersFileLocation = "altUserDB"
 	//jwthandler.JwtTokenLifeInMinutes = 10
 	//jwthandler.JwtTokenRefreshPeriodInSeconds = 60
 

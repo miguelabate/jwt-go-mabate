@@ -46,10 +46,10 @@ type MaClaims struct {
 }
 
 //not secured: to sign up. Creates a user/pass in the db
-func Signup(w http.ResponseWriter, r *http.Request) {
-	var creds Credentials
+func SignUp(w http.ResponseWriter, r *http.Request) {
+	var credentials Credentials
 	// Get the JSON body and decode into credentials
-	err := json.NewDecoder(r.Body).Decode(&creds)
+	err := json.NewDecoder(r.Body).Decode(&credentials)
 	if err != nil {
 		// If the structure of the body is wrong, return an HTTP error
 		w.WriteHeader(http.StatusBadRequest)
@@ -57,28 +57,28 @@ func Signup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// check if the user already exists
-	if _, ok := users.Users[creds.Username]; ok {
+	if _, ok := users.Users[credentials.Username]; ok {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(fmt.Sprintf("Error: User %s already exists", creds.Username)))
+		_, _ = w.Write([]byte(fmt.Sprintf("Error: User %s already exists", credentials.Username)))
 		return
 	}
 
 	//all good. create the user
-	users.Users[creds.Username] = hashAndSalt([]byte(creds.Password))
-	users.UserRoles[creds.Username] = []string{"CLIENT"} //create default role as CLIENT
+	users.Users[credentials.Username] = hashAndSalt([]byte(credentials.Password))
+	users.UserRoles[credentials.Username] = []string{"CLIENT"} //create default role as CLIENT
 
 	//write to persistence
-	users.SaveUser(creds.Username, users.Users[creds.Username], users.UserRoles[creds.Username])
+	users.SaveUser(credentials.Username, users.Users[credentials.Username], users.UserRoles[credentials.Username])
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(fmt.Sprintf("User %s created", creds.Username)))
+	_, _ = w.Write([]byte(fmt.Sprintf("User %s created", credentials.Username)))
 }
 
 //not secured: to sign in
-func Signin(w http.ResponseWriter, r *http.Request) {
-	var creds Credentials
+func SignIn(w http.ResponseWriter, r *http.Request) {
+	var credentials Credentials
 	// Get the JSON body and decode into credentials
-	err := json.NewDecoder(r.Body).Decode(&creds)
+	err := json.NewDecoder(r.Body).Decode(&credentials)
 	if err != nil {
 		// If the structure of the body is wrong, return an HTTP error
 		w.WriteHeader(http.StatusBadRequest)
@@ -86,12 +86,12 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the expected password from our in memory map
-	expectedPassword, ok := users.Users[creds.Username]
+	expectedPassword, ok := users.Users[credentials.Username]
 
 	// If a password exists for the given user
 	// AND, if it is the same as the password we received, the we can move ahead
 	// if NOT, then we return an "Unauthorized" status
-	if !ok || !comparePasswords(expectedPassword, []byte(creds.Password)) {
+	if !ok || !comparePasswords(expectedPassword, []byte(credentials.Password)) {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
@@ -103,8 +103,8 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 	// Create the JWT token and claims, which includes the username and expiry time
 	token := lestjwt.New()
 	claims := MaClaims{
-		Username:  creds.Username,
-		Roles:     users.UserRoles[creds.Username],
+		Username:  credentials.Username,
+		Roles:     users.UserRoles[credentials.Username],
 		ExpiresAt: expirationTime.Unix(),
 	}
 
@@ -121,7 +121,7 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 	whiteListTokens = append(whiteListTokens, string(signed))
 
 	// This is what you typically get as a signed JWT from a server
-	w.Write([]byte(fmt.Sprintf("%s", string(signed))))
+	_, _ = w.Write([]byte(fmt.Sprintf("%s", string(signed))))
 }
 
 func addClaims(token *lestjwt.Token, claims *MaClaims) {
@@ -218,7 +218,7 @@ func Refresh(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(fmt.Sprintf("%s", string(signed))))
 }
 
-// deletes the jwt token from the current whitelist. Effectively preventing further calls and forcing a signin.
+// deletes the jwt token from the current whitelist. Effectively preventing further calls and forcing a Sign In.
 func Logout(w http.ResponseWriter, r *http.Request) {
 	tkn, failedAuth := CheckJwtAuth(w, r)
 	if failedAuth {

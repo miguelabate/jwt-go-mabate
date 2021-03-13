@@ -8,7 +8,7 @@ import (
 	"sync"
 )
 
-var UsersFileLocation = "./usersDB"
+var PersistenceUsersFileLocation = "./usersDB"
 
 var mutexForUsersFile sync.Mutex
 
@@ -24,7 +24,7 @@ func SaveUser(username string, hashedPassword string, roles []string) {
 	defer mutexForUsersFile.Unlock()
 
 	// Open file using READ & WRITE permission.
-	var file, err = os.OpenFile(UsersFileLocation, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	var file, err = os.OpenFile(PersistenceUsersFileLocation, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Println("Failed to open users file")
 		return
@@ -48,7 +48,7 @@ func SaveUser(username string, hashedPassword string, roles []string) {
 // function called one time (at the startup of the service) to load all users and roles from teh file in disk
 func LoadUsersFromDB() {
 	// Open file for reading.
-	var file, err = os.OpenFile(UsersFileLocation, os.O_RDWR|os.O_CREATE, 0644)
+	var file, err = os.OpenFile(PersistenceUsersFileLocation, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
 		log.Println("Failed to open users file")
 		return
