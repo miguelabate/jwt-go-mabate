@@ -14,6 +14,7 @@ import (
 
 var JwtTokenLifeInMinutes = 5
 var JwtTokenRefreshPeriodInSeconds = 30
+var GlobalCorsEnabled = true
 
 // key to sign the jwt tokens
 var jwtKey = []byte("change_this_key")
@@ -47,6 +48,10 @@ type MaClaims struct {
 
 //not secured: to sign up. Creates a user/pass in the db
 func SignUp(w http.ResponseWriter, r *http.Request) {
+	if GlobalCorsEnabled {
+		enableCors(&w)
+	}
+
 	var credentials Credentials
 	// Get the JSON body and decode into credentials
 	err := json.NewDecoder(r.Body).Decode(&credentials)
@@ -64,7 +69,7 @@ func SignUp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	//all good. create the user
-	users.Users[credentials.Username] = hashAndSalt([]byte(credentials.Password))
+	users.Users[credentials.Username] = users.HashAndSaltPassword([]byte(credentials.Password))
 	users.UserRoles[credentials.Username] = []string{"CLIENT"} //create default role as CLIENT
 
 	//write to persistence
@@ -76,6 +81,10 @@ func SignUp(w http.ResponseWriter, r *http.Request) {
 
 //not secured: to sign in
 func SignIn(w http.ResponseWriter, r *http.Request) {
+	if GlobalCorsEnabled {
+		enableCors(&w)
+	}
+
 	var credentials Credentials
 	// Get the JSON body and decode into credentials
 	err := json.NewDecoder(r.Body).Decode(&credentials)
@@ -182,6 +191,10 @@ func WithJwtCheck(handler func(w http.ResponseWriter, r *http.Request, jwtToken 
 
 // returns a new token if the current is valid and within JwtTokenRefreshPeriodInSeconds seconds of expiration time
 func Refresh(w http.ResponseWriter, r *http.Request) {
+	if GlobalCorsEnabled {
+		enableCors(&w)
+	}
+
 	tkn, failedAuth := CheckJwtAuth(w, r)
 	if failedAuth {
 		return
@@ -220,6 +233,10 @@ func Refresh(w http.ResponseWriter, r *http.Request) {
 
 // deletes the jwt token from the current whitelist. Effectively preventing further calls and forcing a Sign In.
 func Logout(w http.ResponseWriter, r *http.Request) {
+	if GlobalCorsEnabled {
+		enableCors(&w)
+	}
+
 	tkn, failedAuth := CheckJwtAuth(w, r)
 	if failedAuth {
 		return
@@ -301,16 +318,6 @@ func remove(s []string, r string) []string {
 		}
 	}
 	return s
-}
-
-func hashAndSalt(pwd []byte) string {
-
-	hash, err := bcrypt.GenerateFromPassword(pwd, bcrypt.MinCost)
-	if err != nil {
-		log.Println(err)
-	}
-
-	return string(hash)
 }
 
 func comparePasswords(hashedPwd string, plainPwd []byte) bool { //true: equals

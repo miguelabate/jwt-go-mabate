@@ -2,6 +2,7 @@ package users
 
 import (
 	"bufio"
+	"golang.org/x/crypto/bcrypt"
 	"log"
 	"os"
 	"strings"
@@ -66,7 +67,25 @@ func LoadUsersFromDB() {
 }
 
 // used for testing, just adds a user and roles directly
-func AddUser(userName string, userPass string, roles []string) {
-	Users[userName] = userPass
+func AddUserWithHashedPass(userName string, userPassHashed string, roles []string) {
+	Users[userName] = userPassHashed
 	UserRoles[userName] = roles
+}
+
+func AddUserWithNotHashedPassAndPersist(userName string, userPass string, roles []string) {
+	Users[userName] = HashAndSaltPassword([]byte(userPass))
+	UserRoles[userName] = roles
+
+	//persist
+	SaveUser(userName, Users[userName], roles)
+}
+
+func HashAndSaltPassword(pwd []byte) string {
+
+	hash, err := bcrypt.GenerateFromPassword(pwd, bcrypt.MinCost)
+	if err != nil {
+		log.Println(err)
+	}
+
+	return string(hash)
 }
